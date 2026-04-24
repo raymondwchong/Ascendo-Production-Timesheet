@@ -1,1 +1,652 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Time Tracker">
+  <title>Time Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --bg: #f7f7f5;
+      --surface: #ffffff;
+      --border: #e4e4e0;
+      --border-strong: #c8c8c2;
+      --text: #1a1a18;
+      --text-muted: #6b6b66;
+      --text-faint: #a0a09a;
+      --green: #1D9E75;
+      --green-light: #E1F5EE;
+      --green-dark: #0F6E56;
+      --amber: #EF9F27;
+      --amber-light: #FAEEDA;
+      --amber-dark: #854F0B;
+      --blue: #378ADD;
+      --blue-light: #E6F1FB;
+      --red: #E24B4A;
+      --red-light: #FCEBEB;
+      --radius: 14px;
+      --radius-sm: 9px;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-left h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+    .header-left p { font-size: 13px; color: var(--text-muted); margin-top: 1px; }
+
+    .clock {
+      font-family: 'DM Mono', monospace;
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+    }
+
+    .main { padding: 20px; max-width: 900px; margin: 0 auto; }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 12px;
+    }
+
+    .employee-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .emp-btn {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 12px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+      position: relative;
+      touch-action: manipulation;
+    }
+
+    .emp-btn:active { transform: scale(0.96); }
+    .emp-btn.selected { border-color: var(--green); border-width: 2px; background: var(--green-light); }
+    .emp-btn.status-in { border-color: var(--green); }
+    .emp-btn.status-lunch { border-color: var(--amber); }
+
+    .emp-avatar {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 14px;
+      margin: 0 auto 10px;
+      color: var(--text-muted);
+    }
+
+    .emp-btn.status-in .emp-avatar { background: #9FE1CB; color: #085041; }
+    .emp-btn.status-lunch .emp-avatar { background: #FAC775; color: #412402; }
+    .emp-btn.selected .emp-avatar { background: #5DCAA5; color: #04342C; }
+
+    .emp-first { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+    .emp-last { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
+    .emp-status-text { font-size: 11px; color: var(--text-faint); }
+    .emp-btn.status-in .emp-status-text { color: var(--green-dark); }
+    .emp-btn.status-lunch .emp-status-text { color: var(--amber-dark); }
+
+    .status-pip {
+      position: absolute; top: 10px; right: 10px;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border);
+    }
+    .emp-btn.status-in .status-pip { background: var(--green); }
+    .emp-btn.status-lunch .status-pip { background: var(--amber); }
+
+    .action-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .action-card h2 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+    .action-card .sub { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+    .action-card .sub span { font-family: 'DM Mono', monospace; font-weight: 500; color: var(--text); }
+
+    .action-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .act-btn {
+      flex: 1; min-width: 140px;
+      padding: 16px 20px;
+      border-radius: var(--radius-sm);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px; font-weight: 600;
+      cursor: pointer; border: none;
+      touch-action: manipulation;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .act-btn:active { transform: scale(0.97); opacity: 0.85; }
+    .act-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-clockin { background: var(--green); color: #fff; }
+    .btn-lunch { background: var(--amber); color: #fff; }
+    .btn-endlunch { background: var(--blue); color: #fff; }
+    .btn-clockout { background: var(--bg); color: var(--text); border: 1.5px solid var(--border-strong); }
+
+    .prompt-card {
+      background: var(--surface);
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 30px 20px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 15px;
+      margin-bottom: 24px;
+    }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 0 0 24px; }
+
+    .log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+    .export-btn {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px; font-weight: 500;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border-strong);
+      background: var(--surface);
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .week-pills { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 4px; }
+
+    .week-pill {
+      white-space: nowrap; font-size: 13px;
+      padding: 6px 14px; border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface); cursor: pointer;
+      color: var(--text-muted);
+    }
+
+    .week-pill.active {
+      background: var(--text); color: var(--surface);
+      border-color: var(--text);
+    }
+
+    .summary-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+
+    .chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .chip strong { color: var(--text); font-weight: 600; }
+
+    .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 13px; }
+
+    th {
+      text-align: left; padding: 10px 14px;
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.07em;
+      color: var(--text-faint);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    td.cell-name { font-family: 'DM Sans', sans-serif; font-weight: 500; font-size: 13px; }
+    td.cell-badge { font-family: 'DM Sans', sans-serif; }
+
+    tr:last-child td { border-bottom: none; }
+
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 600;
+      padding: 3px 10px; border-radius: 20px;
+    }
+
+    .badge-in { background: var(--green-light); color: var(--green-dark); }
+    .badge-lunch { background: var(--amber-light); color: var(--amber-dark); }
+    .badge-out { background: var(--bg); color: var(--text-muted); }
+
+    .empty-table { text-align: center; padding: 30px; color: var(--text-faint); font-size: 14px; }
+
+    .toast {
+      position: fixed; bottom: 30px; left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--text); color: var(--surface);
+      border-radius: 30px; padding: 12px 22px;
+      font-size: 14px; font-weight: 500;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      z-index: 999; white-space: nowrap;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    .syncing { opacity: 0.5; pointer-events: none; }
+
+    .sync-indicator {
+      display: inline-block;
+      font-size: 11px;
+      color: var(--text-faint);
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Time Tracker</h1>
+    <p id="dateLabel"></p>
+  </div>
+  <div class="clock" id="liveClock">--:--:--</div>
+</div>
+
+<div class="main">
+  <div class="section-label">Select Employee</div>
+  <div class="employee-grid" id="employeeGrid"></div>
+
+  <div id="actionArea"></div>
+
+  <hr class="divider">
+
+  <div class="log-header">
+    <div class="section-label" style="margin:0">Time Log <span class="sync-indicator" id="syncStatus"></span></div>
+    <button class="export-btn" onclick="exportCSV()">⬇ Export CSV</button>
+  </div>
+  <div class="week-pills" id="weekPills"></div>
+  <div class="summary-row" id="summaryRow"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Date</th>
+          <th>Day</th>
+          <th>Clock In</th>
+          <th>Lunch Out</th>
+          <th>Lunch In</th>
+          <th>Clock Out</th>
+          <th>Hours</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"></tbody>
+    </table>
+    <div class="empty-table" id="emptyTable" style="display:none">No records for this period.</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── CONFIG ──────────────────────────────────────────────
+  const EMPLOYEES = [
+    'Alex Johnson', 'Sam Rivera', 'Jordan Lee', 'Morgan Chen',
+    'Casey Kim', 'Taylor Brooks', 'Riley Davis', 'Drew Martinez'
+  ];
+  // ────────────────────────────────────────────────────────
+
+  let state = { sessions: [], selected: null, activeWeek: null };
+
+  // Local storage persistence (fallback / cache)
+  function saveLocal() {
+    try { localStorage.setItem('tt_sessions', JSON.stringify(state.sessions)); } catch(e) {}
+  }
+
+  function loadLocal() {
+    try {
+      const d = localStorage.getItem('tt_sessions');
+      if (d) state.sessions = JSON.parse(d);
+    } catch(e) {}
+  }
+
+  // ── API calls to Vercel serverless functions ──────────────
+  async function apiLog(payload) {
+    try {
+      const res = await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return res.ok;
+    } catch(e) {
+      console.warn('API call failed, local only:', e);
+      return false;
+    }
+  }
+
+  async function apiGetSessions() {
+    try {
+      const res = await fetch('/api/sessions');
+      if (res.ok) return await res.json();
+    } catch(e) {}
+    return null;
+  }
+
+  async function syncFromSheet() {
+    setSyncStatus('Syncing…');
+    const data = await apiGetSessions();
+    if (data && data.sessions) {
+      state.sessions = data.sessions;
+      saveLocal();
+    }
+    setSyncStatus('');
+    render();
+  }
+
+  function setSyncStatus(msg) {
+    document.getElementById('syncStatus').textContent = msg;
+  }
+
+  // ── Helpers ───────────────────────────────────────────────
+  function nowISO() { return new Date().toISOString(); }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function fmtDay(iso) {
+    return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' });
+  }
+
+  function getWeekKey(iso) {
+    const d = new Date(iso);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d); mon.setDate(diff);
+    return mon.toISOString().slice(0, 10);
+  }
+
+  function weekLabel(key) {
+    const mon = new Date(key);
+    const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+    return mon.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' }) +
+      ' – ' + sun.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  function calcHours(s) {
+    if (!s.clockIn || !s.clockOut) return null;
+    let total = (new Date(s.clockOut) - new Date(s.clockIn)) / 3600000;
+    if (s.lunchStart && s.lunchEnd) total -= (new Date(s.lunchEnd) - new Date(s.lunchStart)) / 3600000;
+    return Math.max(0, total);
+  }
+
+  function getStatus(s) {
+    if (s.clockOut) return 'out';
+    if (s.lunchStart && !s.lunchEnd) return 'lunch';
+    if (s.clockIn) return 'in';
+    return 'out';
+  }
+
+  function getActiveSession(name) {
+    return state.sessions.find(s => s.employee === name && !s.clockOut) || null;
+  }
+
+  function getAllWeeks() {
+    const keys = new Set([getWeekKey(new Date().toISOString())]);
+    state.sessions.forEach(s => keys.add(getWeekKey(s.clockIn)));
+    return Array.from(keys).sort().reverse();
+  }
+
+  // ── Render ────────────────────────────────────────────────
+  function renderClock() {
+    const now = new Date();
+    document.getElementById('liveClock').textContent =
+      now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    document.getElementById('dateLabel').textContent =
+      now.toLocaleDateString('en-AU', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  }
+
+  function renderEmployees() {
+    const grid = document.getElementById('employeeGrid');
+    grid.innerHTML = '';
+    EMPLOYEES.forEach(name => {
+      const session = getActiveSession(name);
+      const status = session ? getStatus(session) : 'out';
+      const parts = name.split(' ');
+      const initials = parts.map(w => w[0]).join('').slice(0, 2);
+      let statusText = 'Available';
+      if (status === 'in') statusText = 'Clocked in';
+      if (status === 'lunch') statusText = 'On lunch';
+
+      const btn = document.createElement('button');
+      btn.className = `emp-btn${state.selected === name ? ' selected' : ''}${status !== 'out' ? ' status-' + status : ''}`;
+      btn.innerHTML = `
+        <div class="status-pip"></div>
+        <div class="emp-avatar">${initials}</div>
+        <div class="emp-first">${parts[0]}</div>
+        <div class="emp-last">${parts.slice(1).join(' ')}</div>
+        <div class="emp-status-text">${statusText}</div>`;
+      btn.onclick = () => { state.selected = state.selected === name ? null : name; render(); };
+      grid.appendChild(btn);
+    });
+  }
+
+  function renderAction() {
+    const area = document.getElementById('actionArea');
+    if (!state.selected) {
+      area.innerHTML = `<div class="prompt-card">Select an employee above to clock in or out</div>`;
+      return;
+    }
+    const name = state.selected;
+    const session = getActiveSession(name);
+    const status = session ? getStatus(session) : 'out';
+    let sub = 'Not clocked in';
+    if (status === 'in') sub = `Clocked in at <span>${fmtTime(session.clockIn)}</span>`;
+    if (status === 'lunch') sub = `On lunch since <span>${fmtTime(session.lunchStart)}</span>`;
+
+    let btns = '';
+    if (status === 'out') btns = `<button class="act-btn btn-clockin" id="actBtn1">Clock In</button>`;
+    else if (status === 'in') btns = `
+      <button class="act-btn btn-lunch" id="actBtn1">Start Lunch Break</button>
+      <button class="act-btn btn-clockout" id="actBtn2">Clock Out</button>`;
+    else if (status === 'lunch') btns = `<button class="act-btn btn-endlunch" id="actBtn1">End Lunch Break</button>`;
+
+    area.innerHTML = `
+      <div class="action-card">
+        <h2>${name}</h2>
+        <div class="sub">${sub}</div>
+        <div class="action-btns">${btns}</div>
+      </div>`;
+
+    if (status === 'out') document.getElementById('actBtn1').onclick = () => clockIn(name);
+    else if (status === 'in') {
+      document.getElementById('actBtn1').onclick = () => startLunch(name);
+      document.getElementById('actBtn2').onclick = () => clockOut(name);
+    } else if (status === 'lunch') {
+      document.getElementById('actBtn1').onclick = () => endLunch(name);
+    }
+  }
+
+  function renderLog() {
+    const weeks = getAllWeeks();
+    if (!state.activeWeek || !weeks.includes(state.activeWeek)) state.activeWeek = weeks[0] || null;
+
+    const pillsEl = document.getElementById('weekPills');
+    pillsEl.innerHTML = '';
+    weeks.forEach(w => {
+      const p = document.createElement('button');
+      p.className = `week-pill${w === state.activeWeek ? ' active' : ''}`;
+      p.textContent = weekLabel(w);
+      p.onclick = () => { state.activeWeek = w; renderLog(); };
+      pillsEl.appendChild(p);
+    });
+
+    const filtered = state.sessions.filter(s => getWeekKey(s.clockIn) === state.activeWeek)
+      .sort((a, b) => new Date(b.clockIn) - new Date(a.clockIn));
+
+    const totalH = filtered.reduce((acc, s) => acc + (calcHours(s) || 0), 0);
+    const uniqueEmp = new Set(filtered.map(s => s.employee)).size;
+    document.getElementById('summaryRow').innerHTML = `
+      <div class="chip"><strong>${filtered.length}</strong> shifts</div>
+      <div class="chip"><strong>${uniqueEmp}</strong> employees</div>
+      <div class="chip"><strong>${totalH.toFixed(1)}</strong> total hours</div>`;
+
+    const tbody = document.getElementById('logBody');
+    const empty = document.getElementById('emptyTable');
+    tbody.innerHTML = '';
+
+    if (!filtered.length) { empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    filtered.forEach(s => {
+      const status = getStatus(s);
+      const hours = calcHours(s);
+      const badgeClass = status === 'in' ? 'badge-in' : status === 'lunch' ? 'badge-lunch' : 'badge-out';
+      const badgeLabel = status === 'in' ? 'Clocked In' : status === 'lunch' ? 'On Lunch' : 'Completed';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="cell-name">${s.employee}</td>
+        <td>${fmtDate(s.clockIn)}</td>
+        <td>${fmtDay(s.clockIn)}</td>
+        <td>${fmtTime(s.clockIn)}</td>
+        <td>${s.lunchStart ? fmtTime(s.lunchStart) : '—'}</td>
+        <td>${s.lunchEnd ? fmtTime(s.lunchEnd) : '—'}</td>
+        <td>${s.clockOut ? fmtTime(s.clockOut) : '—'}</td>
+        <td>${hours !== null ? hours.toFixed(2) + 'h' : '—'}</td>
+        <td class="cell-badge"><span class="badge ${badgeClass}">${badgeLabel}</span></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function render() { renderEmployees(); renderAction(); renderLog(); }
+
+  // ── Toast ─────────────────────────────────────────────────
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // ── Actions ───────────────────────────────────────────────
+  async function clockIn(name) {
+    const session = { employee: name, clockIn: nowISO(), lunchStart: null, lunchEnd: null, clockOut: null };
+    state.sessions.push(session);
+    saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked in`);
+    await apiLog({ action: 'clockIn', ...session });
+  }
+
+  async function startLunch(name) {
+    const s = getActiveSession(name);
+    if (!s) return;
+    s.lunchStart = nowISO();
+    saveLocal(); render(); showToast('Lunch break started');
+    await apiLog({ action: 'lunchStart', employee: name, lunchStart: s.lunchStart });
+  }
+
+  async function endLunch(name) {
+    const s = getActiveSession(name);
+    if (!s) return;
+    s.lunchEnd = nowISO();
+    saveLocal(); render(); showToast('Lunch break ended');
+    await apiLog({ action: 'lunchEnd', employee: name, lunchEnd: s.lunchEnd });
+  }
+
+  async function clockOut(name) {
+    const s = getActiveSession(name);
+    if (!s) return;
+    if (s.lunchStart && !s.lunchEnd) s.lunchEnd = nowISO();
+    s.clockOut = nowISO();
+    state.selected = null;
+    saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked out`);
+    await apiLog({ action: 'clockOut', employee: name, lunchEnd: s.lunchEnd, clockOut: s.clockOut });
+  }
+
+  // ── Export ────────────────────────────────────────────────
+  function exportCSV() {
+    const filtered = state.sessions.filter(s => getWeekKey(s.clockIn) === state.activeWeek)
+      .sort((a, b) => new Date(a.clockIn) - new Date(b.clockIn));
+    const header = ['Employee', 'Date', 'Day', 'Clock In', 'Lunch Out', 'Lunch In', 'Clock Out', 'Hours Worked', 'Lunch Duration (h)', 'Status'];
+    const rows = filtered.map(s => {
+      const hours = calcHours(s);
+      let lunchDur = '';
+      if (s.lunchStart && s.lunchEnd) lunchDur = ((new Date(s.lunchEnd) - new Date(s.lunchStart)) / 3600000).toFixed(2);
+      const status = getStatus(s);
+      return [
+        s.employee, fmtDate(s.clockIn), fmtDay(s.clockIn),
+        fmtTime(s.clockIn),
+        s.lunchStart ? fmtTime(s.lunchStart) : '',
+        s.lunchEnd ? fmtTime(s.lunchEnd) : '',
+        s.clockOut ? fmtTime(s.clockOut) : '',
+        hours !== null ? hours.toFixed(2) : '',
+        lunchDur,
+        status === 'in' ? 'Clocked In' : status === 'lunch' ? 'On Lunch' : 'Completed'
+      ];
+    });
+    const csv = [header, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `timesheet_${state.activeWeek || 'export'}.csv`;
+    a.click();
+    showToast('CSV exported!');
+  }
+
+  // ── Init ──────────────────────────────────────────────────
+  async function init() {
+    loadLocal();
+    render();
+    renderClock();
+    setInterval(renderClock, 1000);
+    // Sync from Google Sheets on load
+    await syncFromSheet();
+    // Refresh from sheet every 60s (in case another tablet made changes)
+    setInterval(syncFromSheet, 60000);
+  }
+
+  init();
+</script>
+</body>
+</html>
+
