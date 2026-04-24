@@ -71,7 +71,7 @@ export default async function handler(req, res) {
         const bl = breaks || [];
         const mins = Math.round(totalBreakMins(bl));
         totalBreak = mins > 0 ? String(mins) : '';
-        hoursWorked = calcHours(rowData[3], clockOut, bl);
+        hoursWorked = calcHours(clockIn, clockOut, bl);
         b1s = bl[0] ? fmtTime(bl[0].start) : b1s; b1e = bl[0]&&bl[0].end ? fmtTime(bl[0].end) : b1e;
         b2s = bl[1] ? fmtTime(bl[1].start) : b2s; b2e = bl[1]&&bl[1].end ? fmtTime(bl[1].end) : b2e;
         b3s = bl[2] ? fmtTime(bl[2].start) : b3s; b3e = bl[2]&&bl[2].end ? fmtTime(bl[2].end) : b3e;
