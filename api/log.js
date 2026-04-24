@@ -1,207 +1,90 @@
-// api/log.js
-// Vercel serverless function — receives clock events and writes to Google Sheets
-
 const { google } = require('googleapis');
-
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = 'TimeLog';
 
 async function getAuthClient() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
+  const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
   return auth.getClient();
 }
 
 async function ensureHeaders(sheets) {
-  const headers = [
-    'Row ID', 'Employee', 'Date', 'Day',
-    'Clock In', 'Lunch Out', 'Lunch In', 'Clock Out',
-    'Hours Worked', 'Lunch Duration (h)', 'Status', 'Last Updated'
-  ];
-
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A1:L1`,
-  });
-
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A1:A1` });
   if (!res.data.values || res.data.values.length === 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
+      spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A1`, valueInputOption: 'RAW',
+      requestBody: { values: [['Employee','Date','Day','Clock In','Clock Out','Hours Worked','Total Break (min)','Break 1 Start','Break 1 End','Break 2 Start','Break 2 End','Break 3 Start','Break 3 End','Status','Last Updated']] }
     });
   }
 }
 
-function fmtTime(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
-}
+function fmtTime(iso) { if (!iso) return ''; return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true }); }
+function fmtDate(iso) { return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function fmtDay(iso) { return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' }); }
+function totalBreakMins(breaks) { return (breaks || []).reduce((acc, b) => { if (b.start && b.end) return acc + (new Date(b.end) - new Date(b.start)) / 60000; return acc; }, 0); }
+function calcHours(clockIn, clockOut, breaks) { if (!clockIn || !clockOut) return ''; const total = (new Date(clockOut) - new Date(clockIn)) / 3600000; return Math.max(0, total - totalBreakMins(breaks) / 60).toFixed(2); }
 
-function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function fmtDay(iso) {
-  return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' });
-}
-
-function calcHours(clockIn, clockOut, lunchStart, lunchEnd) {
-  if (!clockIn || !clockOut) return '';
-  let total = (new Date(clockOut) - new Date(clockIn)) / 3600000;
-  if (lunchStart && lunchEnd) total -= (new Date(lunchEnd) - new Date(lunchStart)) / 3600000;
-  return Math.max(0, total).toFixed(2);
-}
-
-function getStatus(clockOut, lunchStart, lunchEnd) {
-  if (clockOut) return 'Completed';
-  if (lunchStart && !lunchEnd) return 'On Lunch';
-  if (lunchStart && lunchEnd) return 'Clocked In';
-  return 'Clocked In';
-}
-
-// Find existing row for this session (employee + clockIn date)
-async function findExistingRow(sheets, employee, clockInISO) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:E`,
-  });
-
+async function findActiveRow(sheets, employee) {
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A:O` });
   const rows = res.data.values || [];
-  const dateStr = fmtDate(clockInISO);
-
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][1] === employee && rows[i][2] === dateStr) {
-      return i + 1; // 1-indexed sheet row number
-    }
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (rows[i][0] === employee && rows[i][13] !== 'Completed') return { rowNumber: i + 1, rowData: rows[i] };
   }
   return null;
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
     await ensureHeaders(sheets);
-
-    const { action, employee, clockIn, lunchStart, lunchEnd, clockOut } = req.body;
+    const { action, employee, clockIn, clockOut, breaks, breakStart, breakEnd, breakIndex } = req.body;
     const now = new Date().toISOString();
 
     if (action === 'clockIn') {
-      // Insert a new row
-      const row = [
-        `${employee}_${clockIn}`, // row ID
-        employee,
-        fmtDate(clockIn),
-        fmtDay(clockIn),
-        fmtTime(clockIn),
-        '', '', '',             // lunch out, lunch in, clock out (empty)
-        '',                    // hours
-        '',                    // lunch duration
-        'Clocked In',
-        now
-      ];
-
       await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A:L`,
-        valueInputOption: 'RAW',
-        requestBody: { values: [row] },
+        spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A:O`, valueInputOption: 'RAW',
+        requestBody: { values: [[employee, fmtDate(clockIn), fmtDay(clockIn), fmtTime(clockIn), '', '', '', '', '', '', '', '', '', 'Clocked In', now]] }
       });
-
     } else {
-      // Find the existing row and update it
-      // We need to get the clock in time — stored in body for lunch/clockout actions
-      // Fetch all rows to find matching employee row without clockOut
-      const allRows = await sheets.spreadsheets.values.get({
-        spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A:L`,
-      });
+      const found = await findActiveRow(sheets, employee);
+      if (!found) return res.status(404).json({ error: 'Active session not found' });
+      const { rowNumber, rowData } = found;
 
-      const rows = allRows.data.values || [];
-      let targetRowIndex = null;
-      let existingData = null;
+      let b1s = rowData[7]||'', b1e = rowData[8]||'', b2s = rowData[9]||'', b2e = rowData[10]||'', b3s = rowData[11]||'', b3e = rowData[12]||'';
 
-      for (let i = rows.length - 1; i >= 1; i--) {
-        if (rows[i][1] === employee && rows[i][10] !== 'Completed') {
-          targetRowIndex = i + 1;
-          existingData = rows[i];
-          break;
-        }
+      if (action === 'breakStart') {
+        const t = fmtTime(breakStart);
+        if (breakIndex === 0) b1s = t; else if (breakIndex === 1) b2s = t; else if (breakIndex === 2) b3s = t;
+      }
+      if (action === 'breakEnd') {
+        const t = fmtTime(breakEnd);
+        if (breakIndex === 0) b1e = t; else if (breakIndex === 1) b2e = t; else if (breakIndex === 2) b3e = t;
       }
 
-      if (!targetRowIndex) {
-        return res.status(404).json({ error: 'Active session not found' });
-      }
+      let clockOutFmt = rowData[4]||'', hoursWorked = rowData[5]||'', totalBreak = rowData[6]||'';
+      let status = action === 'clockOut' ? 'Completed' : action === 'breakStart' ? 'On Break' : 'Clocked In';
 
-      // Parse existing data
-      const existing = {
-        clockIn: existingData[4],
-        lunchOut: existingData[5],
-        lunchIn: existingData[6],
-        clockOut: existingData[7],
-      };
-
-      if (action === 'lunchStart') existing.lunchOut = fmtTime(lunchStart);
-      if (action === 'lunchEnd') existing.lunchIn = fmtTime(lunchEnd);
       if (action === 'clockOut') {
-        if (lunchEnd && !existing.lunchIn) existing.lunchIn = fmtTime(lunchEnd);
-        existing.clockOut = fmtTime(clockOut);
+        clockOutFmt = fmtTime(clockOut);
+        const bl = breaks || [];
+        const mins = Math.round(totalBreakMins(bl));
+        totalBreak = mins > 0 ? String(mins) : '';
+        hoursWorked = calcHours(rowData[3], clockOut, bl);
+        b1s = bl[0] ? fmtTime(bl[0].start) : b1s; b1e = bl[0]&&bl[0].end ? fmtTime(bl[0].end) : b1e;
+        b2s = bl[1] ? fmtTime(bl[1].start) : b2s; b2e = bl[1]&&bl[1].end ? fmtTime(bl[1].end) : b2e;
+        b3s = bl[2] ? fmtTime(bl[2].start) : b3s; b3e = bl[2]&&bl[2].end ? fmtTime(bl[2].end) : b3e;
       }
-
-      // Recalculate hours if we have all data
-      let hoursWorked = '';
-      let lunchDuration = '';
-
-      // Re-derive ISO times for calculation from original clockIn
-      const clockInISO = req.body.clockIn || null;
-
-      if (action === 'clockOut' && clockInISO && clockOut) {
-        hoursWorked = calcHours(clockInISO, clockOut, lunchStart, lunchEnd);
-        if (lunchStart && lunchEnd) {
-          lunchDuration = ((new Date(lunchEnd) - new Date(lunchStart)) / 3600000).toFixed(2);
-        }
-      }
-
-      const newStatus = action === 'clockOut' ? 'Completed' :
-                        action === 'lunchStart' ? 'On Lunch' : 'Clocked In';
-
-      const updatedRow = [
-        existingData[0],
-        employee,
-        existingData[2],
-        existingData[3],
-        existing.clockIn,
-        existing.lunchOut,
-        existing.lunchIn,
-        existing.clockOut || '',
-        hoursWorked || existingData[8] || '',
-        lunchDuration || existingData[9] || '',
-        newStatus,
-        now
-      ];
 
       await sheets.spreadsheets.values.update({
-        spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A${targetRowIndex}:L${targetRowIndex}`,
-        valueInputOption: 'RAW',
-        requestBody: { values: [updatedRow] },
+        spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A${rowNumber}:O${rowNumber}`, valueInputOption: 'RAW',
+        requestBody: { values: [[employee, rowData[1], rowData[2], rowData[3], clockOutFmt, hoursWorked, totalBreak, b1s, b1e, b2s, b2e, b3s, b3e, status, now]] }
       });
     }
-
     res.status(200).json({ success: true });
-
   } catch (err) {
     console.error('Sheets API error:', err);
     res.status(500).json({ error: err.message });
   }
 }
-
