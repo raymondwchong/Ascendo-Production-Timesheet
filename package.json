@@ -1,0 +1,11 @@
+{
+  "name": "time-tracker",
+  "version": "1.0.0",
+  "description": "Employee time tracker with Google Sheets integration",
+  "dependencies": {
+    "googleapis": "^140.0.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
