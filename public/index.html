@@ -311,7 +311,7 @@
     const lb = s.breaks[s.breaks.length - 1]; if (lb && !lb.end) lb.end = nowISO();
     s.clockOut = nowISO(); state.selected = null;
     saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked out`);
-    await apiLog({ action: 'clockOut', employee: name, breaks: s.breaks, clockOut: s.clockOut });
+    await apiLog({ action: 'clockOut', employee: name, clockIn: s.clockIn, breaks: s.breaks, clockOut: s.clockOut });
   }
 
   function exportCSV() {
