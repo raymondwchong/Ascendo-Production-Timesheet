@@ -1,0 +1,99 @@
+# Ascendo Production Timesheet — Changelog
+
+## How to add to GitHub
+1. Go to your GitHub repo
+2. Click **Add file → Create new file**
+3. Name it `CHANGELOG.md`
+4. Paste this content in
+5. Click **Commit changes**
+
+---
+
+## Version History
+
+---
+
+### v4 — Timezone Fix
+**Files changed:** `public/index.html`, `api/log.js`
+
+**Problem:** Clock in/out times were being recorded in US time (UTC) instead of Australian local time, because the Vercel server is hosted in Washington DC.
+
+**Fix:** All time formatting is now done in the browser (which knows the local timezone) before being sent to the server. The server no longer formats any times — it simply writes whatever it receives directly to the Google Sheet.
+
+---
+
+### v3 — Unlimited Breaks & New Employees
+**Files changed:** `public/index.html`, `api/log.js`, `api/sessions.js`
+
+**Changes:**
+- Added employees **Jamie** and **Wendy** to the roster
+- Replaced separate Break 1/2/3 columns in the Google Sheet with a single **Breaks Detail** summary column (e.g. `B1: 09:00 AM–09:15 AM (15m), B2: 12:30 PM–01:00 PM (30m)`)
+- This allows unlimited breaks per shift with no column limit
+- Hours Worked still correctly deducts all break time regardless of how many breaks are taken
+
+---
+
+### v2 — Multiple Breaks Support
+**Files changed:** `public/index.html`, `api/log.js`
+
+**Problem:** The app only supported a single lunch break per shift.
+
+**Changes:**
+- Replaced "Lunch Break" with a general **Break** system
+- Employees can now take unlimited breaks in a single shift
+- Each break is tracked with a start and end time
+- Break history is shown in the action panel during a shift
+- Google Sheet stored up to 3 breaks in separate columns (later replaced in v3)
+- CSV export includes all break times and total break duration
+- Hours Worked automatically deducts total break time
+
+---
+
+### v1.2 — NaN Fix in Hours Worked
+**Files changed:** `public/index.html`, `api/log.js`
+
+**Problem:** The Hours Worked column in Google Sheets was showing NaN (Not a Number).
+
+**Cause:** When clocking out, the server was trying to calculate hours using the formatted time string stored in the sheet (e.g. "09:30 AM") instead of the original precise timestamp. JavaScript cannot do maths on formatted time strings.
+
+**Fix:** The app now sends the original ISO timestamp (`clockIn`) along with the clock-out event, so the server always has the raw timestamps needed for accurate calculation.
+
+---
+
+### v1.1 — Google Sheets Integration
+**Files changed:** `api/log.js`, `api/sessions.js`, `public/index.html`
+
+**Changes:**
+- Connected the app to Google Sheets via a Google Service Account
+- Every clock event (clock in, break start, break end, clock out) writes to the **TimeLog** tab in real time
+- The app syncs from the sheet on load and every 60 seconds, keeping multiple tablets in sync
+- Local browser storage used as a cache so the app still works if internet drops temporarily
+- Google Sheet columns: Employee, Date, Day, Clock In, Lunch Out, Lunch In, Clock Out, Hours Worked, Lunch Duration, Status, Last Updated
+
+---
+
+### v1.0 — Initial Build
+**Files created:** `public/index.html`, `api/log.js`, `api/sessions.js`, `vercel.json`, `package.json`
+
+**Features:**
+- Tablet-friendly employee time tracker hosted on Vercel
+- Employees: Augustina, Hong, Lily, Shina
+- Clock In → Lunch Break → End Lunch → Clock Out workflow
+- Live clock display with local date
+- Time log table with weekly filter
+- CSV export for weekly timesheets
+- Data stored in Google Sheets via serverless API functions
+- App adds to tablet home screen and runs like a native app
+
+---
+
+## Infrastructure
+
+| Component | Details |
+|---|---|
+| Hosting | Vercel (auto-deploys from GitHub on every commit) |
+| Repo | github.com/raymondwchong/Ascendo-Production-Timesheet |
+| Data | Google Sheets — TimeLog tab |
+| Auth | Google Service Account (credentials stored as Vercel environment variables) |
+| Environment Variables | `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` |
+
