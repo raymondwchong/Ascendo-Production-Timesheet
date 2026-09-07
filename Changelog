@@ -10,6 +10,12 @@
 ---
 
 ## Version History
+### v6 — Remove CSV Export / Payroll Procedure
+**Files changed:** `public/index.html`
+
+**Change:** Removed the Export CSV button from the app front page.
+All data is sourced directly from the Google Sheet. A manual payroll procedure has been adopted instead — payroll staff create a weekly copy of TimeLog data into a separate Google Sheet for processing, leaving the live TimeLog sheet untouched.
+Added full employee list.
 
 ### v5 — Timezone Sync Fix
 **Files changed:** `public/index.html`, `api/log.js`, `api/sessions.js`
