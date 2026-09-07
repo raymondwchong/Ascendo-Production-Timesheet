@@ -332,14 +332,14 @@
     const s = getActiveSession(name); if (!s) return;
     s.breaks.push({ start: nowISO(), end: null });
     saveLocal(); render(); showToast('Break started');
-    await apiLog({ action: 'breakStart', employee: name });
+    await apiLog({ action: 'breakStart', employee: name, breaks: s.breaks });
   }
 
   async function endBreak(name) {
     const s = getActiveSession(name); if (!s) return;
     const lb = s.breaks[s.breaks.length - 1]; if (lb) lb.end = nowISO();
     saveLocal(); render(); showToast('Break ended');
-    await apiLog({ action: 'breakEnd', employee: name });
+    await apiLog({ action: 'breakEnd', employee: name, breaks: s.breaks });
   }
 
   async function clockOut(name) {
