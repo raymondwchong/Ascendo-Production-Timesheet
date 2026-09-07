@@ -132,39 +132,43 @@
   function saveLocal() { try { localStorage.setItem('tt_v3', JSON.stringify(state.sessions)); } catch(e) {} }
   function loadLocal() { try { const d = localStorage.getItem('tt_v3'); if (d) state.sessions = JSON.parse(d); } catch(e) {} }
 
-  async function apiLog(payload) {
-    try {
-      const res = await fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      return res.ok;
-    } catch(e) { return false; }
-  }
-
-  async function apiGetSessions() {
-    try { const res = await fetch('/api/sessions'); if (res.ok) return await res.json(); } catch(e) {}
-    return null;
-  }
-
-  async function syncFromSheet() {
-    setSyncStatus('Syncing…');
-    const data = await apiGetSessions();
-    if (data && data.sessions) { state.sessions = data.sessions; saveLocal(); }
-    setSyncStatus(''); render();
-  }
-
-  function setSyncStatus(msg) { document.getElementById('syncStatus').textContent = msg; }
+  // ── Time formatting (all done in browser so timezone is correct) ──
   function nowISO() { return new Date().toISOString(); }
-  function fmtTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true }); }
-  function fmtDate(iso) { return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
-  function fmtDay(iso) { return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' }); }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function fmtDay(iso) {
+    return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' });
+  }
 
   function totalBreakMins(breaks) {
-    return (breaks || []).reduce((acc, b) => { if (b.start && b.end) return acc + (new Date(b.end) - new Date(b.start)) / 60000; return acc; }, 0);
+    return (breaks || []).reduce((acc, b) => {
+      if (b.start && b.end) return acc + (new Date(b.end) - new Date(b.start)) / 60000;
+      return acc;
+    }, 0);
   }
 
   function calcHours(s) {
     if (!s.clockIn || !s.clockOut) return null;
     const total = (new Date(s.clockOut) - new Date(s.clockIn)) / 3600000;
     return Math.max(0, total - totalBreakMins(s.breaks) / 60);
+  }
+
+  function formatBreaksDetail(breaks) {
+    if (!breaks || breaks.length === 0) return '';
+    return breaks.map((b, i) => {
+      const start = fmtTime(b.start);
+      const end = b.end ? fmtTime(b.end) : 'ongoing';
+      const mins = b.start && b.end ? ` (${Math.round((new Date(b.end) - new Date(b.start)) / 60000)}m)` : '';
+      return `B${i + 1}: ${start}–${end}${mins}`;
+    }).join(', ');
   }
 
   function getStatus(s) {
@@ -193,6 +197,29 @@
     return Array.from(keys).sort().reverse();
   }
 
+  // ── API ───────────────────────────────────────────────────
+  async function apiLog(payload) {
+    try {
+      const res = await fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      return res.ok;
+    } catch(e) { return false; }
+  }
+
+  async function apiGetSessions() {
+    try { const res = await fetch('/api/sessions'); if (res.ok) return await res.json(); } catch(e) {}
+    return null;
+  }
+
+  async function syncFromSheet() {
+    setSyncStatus('Syncing…');
+    const data = await apiGetSessions();
+    if (data && data.sessions) { state.sessions = data.sessions; saveLocal(); }
+    setSyncStatus(''); render();
+  }
+
+  function setSyncStatus(msg) { document.getElementById('syncStatus').textContent = msg; }
+
+  // ── Render ────────────────────────────────────────────────
   function renderClock() {
     const now = new Date();
     document.getElementById('liveClock').textContent = now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -284,26 +311,35 @@
   }
 
   function render() { renderEmployees(); renderAction(); renderLog(); }
-
   function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
+  // ── Actions (all times formatted in browser before sending) ──
   async function clockIn(name) {
-    const session = { employee: name, clockIn: nowISO(), breaks: [], clockOut: null };
+    const now = nowISO();
+    const session = { employee: name, clockIn: now, breaks: [], clockOut: null };
     state.sessions.push(session); saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked in`);
-    await apiLog({ action: 'clockIn', employee: name, clockIn: session.clockIn });
+    await apiLog({
+      action: 'clockIn',
+      employee: name,
+      clockInISO: now,
+      clockInFormatted: fmtTime(now),
+      clockInDate: fmtDate(now),
+      clockInDay: fmtDay(now)
+    });
   }
 
   async function startBreak(name) {
     const s = getActiveSession(name); if (!s) return;
-    s.breaks.push({ start: nowISO(), end: null }); saveLocal(); render(); showToast('Break started');
-    await apiLog({ action: 'breakStart', employee: name, breakStart: s.breaks[s.breaks.length - 1].start, breakIndex: s.breaks.length - 1 });
+    s.breaks.push({ start: nowISO(), end: null });
+    saveLocal(); render(); showToast('Break started');
+    await apiLog({ action: 'breakStart', employee: name });
   }
 
   async function endBreak(name) {
     const s = getActiveSession(name); if (!s) return;
     const lb = s.breaks[s.breaks.length - 1]; if (lb) lb.end = nowISO();
     saveLocal(); render(); showToast('Break ended');
-    await apiLog({ action: 'breakEnd', employee: name, breakEnd: lb.end, breakIndex: s.breaks.length - 1 });
+    await apiLog({ action: 'breakEnd', employee: name });
   }
 
   async function clockOut(name) {
@@ -311,18 +347,33 @@
     const lb = s.breaks[s.breaks.length - 1]; if (lb && !lb.end) lb.end = nowISO();
     s.clockOut = nowISO(); state.selected = null;
     saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked out`);
-    await apiLog({ action: 'clockOut', employee: name, breaks: s.breaks, clockOut: s.clockOut });
+    const hours = calcHours(s);
+    const breakMins = totalBreakMins(s.breaks);
+    await apiLog({
+      action: 'clockOut',
+      employee: name,
+      clockInISO: s.clockIn,
+      clockOutISO: s.clockOut,
+      clockOutFormatted: fmtTime(s.clockOut),
+      breaks: s.breaks,
+      breaksDetail: formatBreaksDetail(s.breaks),
+      totalBreakMins: breakMins
+    });
   }
 
   function exportCSV() {
     const filtered = state.sessions.filter(s => getWeekKey(s.clockIn) === state.activeWeek).sort((a, b) => new Date(a.clockIn) - new Date(b.clockIn));
-    const rows = [['Employee','Date','Day','Clock In','Clock Out','Hours Worked','Total Break (min)','Break 1 Start','Break 1 End','Break 2 Start','Break 2 End','Break 3 Start','Break 3 End','Status']];
+    const rows = [['Employee','Date','Day','Clock In','Clock Out','Hours Worked','Total Break (min)','Breaks Detail','Status']];
     filtered.forEach(s => {
       const hours = calcHours(s);
-      const row = [s.employee, fmtDate(s.clockIn), fmtDay(s.clockIn), fmtTime(s.clockIn), s.clockOut ? fmtTime(s.clockOut) : '', hours !== null ? hours.toFixed(2) : '', Math.round(totalBreakMins(s.breaks)) || ''];
-      for (let i = 0; i < 3; i++) { const b = (s.breaks || [])[i]; row.push(b ? fmtTime(b.start) : ''); row.push(b && b.end ? fmtTime(b.end) : ''); }
-      row.push(getStatus(s) === 'in' ? 'Clocked In' : getStatus(s) === 'break' ? 'On Break' : 'Completed');
-      rows.push(row);
+      rows.push([
+        s.employee, fmtDate(s.clockIn), fmtDay(s.clockIn),
+        fmtTime(s.clockIn), s.clockOut ? fmtTime(s.clockOut) : '',
+        hours !== null ? hours.toFixed(2) : '',
+        Math.round(totalBreakMins(s.breaks)) || '',
+        formatBreaksDetail(s.breaks),
+        getStatus(s) === 'in' ? 'Clocked In' : getStatus(s) === 'break' ? 'On Break' : 'Completed'
+      ]);
     });
     const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `timesheet_${state.activeWeek || 'export'}.csv`; a.click();
