@@ -62,7 +62,7 @@
     .prompt-card { background: var(--surface); border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 30px 20px; text-align: center; color: var(--text-faint); font-size: 15px; margin-bottom: 24px; }
     .divider { border: none; border-top: 1px solid var(--border); margin: 0 0 24px; }
     .log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .export-btn { font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; padding: 8px 16px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-strong); background: var(--surface); cursor: pointer; color: var(--text); }
+    
     .week-pills { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 4px; }
     .week-pill { white-space: nowrap; font-size: 13px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text-muted); }
     .week-pill.active { background: var(--text); color: var(--surface); border-color: var(--text); }
@@ -102,7 +102,7 @@
   <hr class="divider">
   <div class="log-header">
     <div class="section-label" style="margin:0">Time Log <span class="sync-indicator" id="syncStatus"></span></div>
-    <button class="export-btn" onclick="exportCSV()">⬇ Export CSV</button>
+    
   </div>
   <div class="week-pills" id="weekPills"></div>
   <div class="summary-row" id="summaryRow"></div>
@@ -123,7 +123,7 @@
 <script>
   // ── CONFIG ──────────────────────────────────────────────
   const EMPLOYEES = [
-    'Agustina', 'Andrew', 'Ann', 'Billy', 'Emily', 'Geoff', 'Hong', 'Lily', 'Novita', 'Philip', 'Pip Nagy', 'Sharon', 'Shina', 'Theresa', 'Jamie', 'Huiwen' 
+    'Agustina', 'Andrew', 'Ann', 'Billy', 'Emily', 'Geoff', 'Hong', 'Lily', 'Novita', 'Philip', 'Pip Nagy', 'Sharon', 'Shina', 'Theresa', 'Jamie', 'Huiwen'
   ];
   // ────────────────────────────────────────────────────────
 
@@ -361,24 +361,6 @@
     });
   }
 
-  function exportCSV() {
-    const filtered = state.sessions.filter(s => getWeekKey(s.clockIn) === state.activeWeek).sort((a, b) => new Date(a.clockIn) - new Date(b.clockIn));
-    const rows = [['Employee','Date','Day','Clock In','Clock Out','Hours Worked','Total Break (min)','Breaks Detail','Status']];
-    filtered.forEach(s => {
-      const hours = calcHours(s);
-      rows.push([
-        s.employee, fmtDate(s.clockIn), fmtDay(s.clockIn),
-        fmtTime(s.clockIn), s.clockOut ? fmtTime(s.clockOut) : '',
-        hours !== null ? hours.toFixed(2) : '',
-        Math.round(totalBreakMins(s.breaks)) || '',
-        formatBreaksDetail(s.breaks),
-        getStatus(s) === 'in' ? 'Clocked In' : getStatus(s) === 'break' ? 'On Break' : 'Completed'
-      ]);
-    });
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `timesheet_${state.activeWeek || 'export'}.csv`; a.click();
-    showToast('CSV exported!');
-  }
 
   async function init() { loadLocal(); render(); renderClock(); setInterval(renderClock, 1000); await syncFromSheet(); setInterval(syncFromSheet, 60000); }
   init();
