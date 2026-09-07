@@ -11,7 +11,16 @@
 
 ## Version History
 
----
+### v5 — Timezone Sync Fix
+**Files changed:** `public/index.html`, `api/log.js`, `api/sessions.js`
+
+**Problem:** When the app synced from the Google Sheet every 60 seconds, formatted
+times like "11:41 AM" were being misread, causing clock-in times to flip between
+AM and PM incorrectly.
+
+**Fix:** Three hidden columns (_clockInISO, _clockOutISO, _breaksJSON) are now
+stored in the sheet containing the raw unambiguous timestamps. The sync function
+reads these instead of the formatted times, so times are always accurate.---
 
 ### v4 — Timezone Fix
 **Files changed:** `public/index.html`, `api/log.js`
@@ -19,8 +28,6 @@
 **Problem:** Clock in/out times were being recorded in US time (UTC) instead of Australian local time, because the Vercel server is hosted in Washington DC.
 
 **Fix:** All time formatting is now done in the browser (which knows the local timezone) before being sent to the server. The server no longer formats any times — it simply writes whatever it receives directly to the Google Sheet.
-
----
 
 ### v3 — Unlimited Breaks & New Employees
 **Files changed:** `public/index.html`, `api/log.js`, `api/sessions.js`
