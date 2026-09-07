@@ -15,22 +15,29 @@ export default async function handler(req, res) {
     const sheets = google.sheets({ version: 'v4', auth });
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A2:J`,
+      range: `${SHEET_NAME}!A2:M`,
     });
 
     const rows = response.data.values || [];
 
-    // Columns: A=Employee, B=Date, C=Day, D=ClockIn, E=ClockOut,
-    //          F=HoursWorked, G=TotalBreakMins, H=BreaksDetail, I=Status, J=LastUpdated
+    // Columns:
+    // A=Employee, B=Date, C=Day, D=ClockIn(formatted), E=ClockOut(formatted)
+    // F=HoursWorked, G=TotalBreakMins, H=BreaksDetail, I=Status, J=LastUpdated
+    // K=_clockInISO, L=_clockOutISO, M=_breaksJSON  (raw data for accurate sync)
+
     const sessions = rows
-      .filter(r => r[0] && r[1] && r[3])
-      .map(r => ({
-        employee: r[0] || '',
-        clockIn: r[3] ? parseDateTime(r[1], r[3]) : null,
-        clockOut: r[4] ? parseDateTime(r[1], r[4]) : null,
-        breaks: parseBreaksDetail(r[7], r[1]),
-        hoursWorked: r[5] || null,
-      }))
+      .filter(r => r[0] && r[10]) // must have employee and clockInISO
+      .map(r => {
+        let breaks = [];
+        try { if (r[12]) breaks = JSON.parse(r[12]); } catch(e) {}
+
+        return {
+          employee: r[0],
+          clockIn: r[10] || null,       // use raw ISO — always accurate
+          clockOut: r[11] || null,       // use raw ISO — always accurate
+          breaks: breaks,
+        };
+      })
       .filter(s => s.clockIn);
 
     res.status(200).json({ sessions });
@@ -38,28 +45,4 @@ export default async function handler(req, res) {
     console.error('Sheets read error:', err);
     res.status(500).json({ error: err.message });
   }
-}
-
-function parseDateTime(dateStr, timeStr) {
-  if (!dateStr || !timeStr || timeStr === '—' || timeStr === '') return null;
-  try {
-    const [day, month, year] = dateStr.split('/');
-    const dt = new Date(`${year}-${month}-${day} ${timeStr}`);
-    return isNaN(dt.getTime()) ? null : dt.toISOString();
-  } catch { return null; }
-}
-
-// Parse the summary string "B1: 10:00 AM–10:15 AM (15m), B2: 12:30 PM–01:00 PM (30m)"
-// back into a breaks array for the app to display
-function parseBreaksDetail(detail, dateStr) {
-  if (!detail || !dateStr) return [];
-  try {
-    return detail.split(', ').map(part => {
-      const match = part.match(/B\d+:\s*(.+?)–(.+?)(?:\s*\(\d+m\))?$/);
-      if (!match) return null;
-      const start = parseDateTime(dateStr, match[1].trim());
-      const end = match[2].trim() === 'ongoing' ? null : parseDateTime(dateStr, match[2].trim());
-      return { start, end };
-    }).filter(Boolean);
-  } catch { return []; }
 }
