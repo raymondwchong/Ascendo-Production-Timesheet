@@ -2,20 +2,56 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = 'TimeLog';
 
+// Columns: A=Employee, B=Date, C=Day, D=ClockIn, E=ClockOut,
+//          F=HoursWorked, G=TotalBreak(min), H=B1Start, I=B1End,
+//          J=B2Start, K=B2End, L=B3Start, M=B3End, N=Status, O=LastUpdated
+//          P=_clockInISO, Q=_clockOutISO
+
+const HEADERS = [
+  'Employee','Date','Day','Clock In','Clock Out',
+  'Hours Worked','Total Break (min)',
+  'Break 1 Start','Break 1 End',
+  'Break 2 Start','Break 2 End',
+  'Break 3 Start','Break 3 End',
+  'Status','Last Updated',
+  '_clockInISO','_clockOutISO'
+];
+
 async function getAuthClient() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
   return auth.getClient();
 }
 
 async function ensureHeaders(sheets) {
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A1:A1` });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${SHEET_NAME}!A1:A1`,
+  });
   if (!res.data.values || res.data.values.length === 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A1`, valueInputOption: 'RAW',
-      requestBody: { values: [['Employee','Date','Day','Clock In','Clock Out','Hours Worked','Total Break (min)','Breaks Detail','Status','Last Updated','_clockInISO','_clockOutISO','_breaksJSON']] }
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [HEADERS] },
     });
   }
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function fmtDay(iso) {
+  return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long' });
 }
 
 function totalBreakMins(breaks) {
@@ -31,17 +67,47 @@ function calcHours(clockInISO, clockOutISO, breaks) {
   return Math.max(0, total - totalBreakMins(breaks) / 60).toFixed(2);
 }
 
+// Find the active (no clock out) row for this employee
 async function findActiveRow(sheets, employee) {
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A:M` });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${SHEET_NAME}!A:Q`,
+  });
   const rows = res.data.values || [];
   for (let i = rows.length - 1; i >= 1; i--) {
-    if (rows[i][0] === employee && rows[i][8] !== 'Completed') return { rowNumber: i + 1, rowData: rows[i] };
+    if (rows[i][0] === employee && rows[i][13] !== 'Completed') {
+      return { rowNumber: i + 1, rowData: rows[i] };
+    }
   }
   return null;
 }
 
+function buildRow(fields) {
+  // Always returns a full 17-column row
+  return [
+    fields.employee   || '',
+    fields.date       || '',
+    fields.day        || '',
+    fields.clockIn    || '',
+    fields.clockOut   || '',
+    fields.hours      || '',
+    fields.breakMins  || '',
+    fields.b1s        || '',
+    fields.b1e        || '',
+    fields.b2s        || '',
+    fields.b2e        || '',
+    fields.b3s        || '',
+    fields.b3e        || '',
+    fields.status     || '',
+    fields.updated    || '',
+    fields.clockInISO || '',
+    fields.clockOutISO|| '',
+  ];
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
   try {
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
@@ -51,19 +117,27 @@ export default async function handler(req, res) {
       action, employee,
       clockInFormatted, clockInDate, clockInDay, clockInISO,
       clockOutFormatted, clockOutISO,
-      breaks, breaksDetail, totalBreakMins: totalBreakMinsVal
+      breaks,
+      breakStartFormatted, breakEndFormatted, breakIndex,
     } = req.body;
 
     const now = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
 
     if (action === 'clockIn') {
+      const row = buildRow({
+        employee,
+        date: clockInDate,
+        day: clockInDay,
+        clockIn: clockInFormatted,
+        status: 'Clocked In',
+        updated: now,
+        clockInISO,
+      });
       await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A:M`, valueInputOption: 'RAW',
-        requestBody: { values: [[
-          employee, clockInDate, clockInDay, clockInFormatted,
-          '', '', '', '', 'Clocked In', now,
-          clockInISO, '', ''  // hidden ISO columns
-        ]]}
+        spreadsheetId: SHEET_ID,
+        range: `${SHEET_NAME}!A:Q`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [row] },
       });
 
     } else {
@@ -71,36 +145,73 @@ export default async function handler(req, res) {
       if (!found) return res.status(404).json({ error: 'Active session not found' });
       const { rowNumber, rowData } = found;
 
-      let clockOutFmt = rowData[4] || '';
-      let hoursWorked = rowData[5] || '';
-      let totalBreak = rowData[6] || '';
-      let breaksDetailVal = rowData[7] || '';
-      let status = action === 'clockOut' ? 'Completed' : action === 'breakStart' ? 'On Break' : 'Clocked In';
-      let storedClockOutISO = rowData[11] || '';
-      let storedBreaksJSON = rowData[12] || '';
+      // Read existing break columns
+      let b1s = rowData[7]  || '';
+      let b1e = rowData[8]  || '';
+      let b2s = rowData[9]  || '';
+      let b2e = rowData[10] || '';
+      let b3s = rowData[11] || '';
+      let b3e = rowData[12] || '';
+      let clockOutFmt  = rowData[4]  || '';
+      let hours        = rowData[5]  || '';
+      let breakMins    = rowData[6]  || '';
+      let storedClockOutISO = rowData[16] || '';
+      let status = rowData[13] || 'Clocked In';
 
-      if (action === 'clockOut') {
+      if (action === 'breakStart') {
+        // Write start time to the correct break slot
+        if (breakIndex === 0)      b1s = breakStartFormatted;
+        else if (breakIndex === 1) b2s = breakStartFormatted;
+        else if (breakIndex === 2) b3s = breakStartFormatted;
+        status = 'On Break';
+
+      } else if (action === 'breakEnd') {
+        // Write end time to the correct break slot
+        if (breakIndex === 0)      b1e = breakEndFormatted;
+        else if (breakIndex === 1) b2e = breakEndFormatted;
+        else if (breakIndex === 2) b3e = breakEndFormatted;
+        status = 'Clocked In';
+
+      } else if (action === 'clockOut') {
         clockOutFmt = clockOutFormatted;
         storedClockOutISO = clockOutISO;
-        storedBreaksJSON = JSON.stringify(breaks || []);
-        hoursWorked = calcHours(rowData[10], clockOutISO, breaks);
-        totalBreak = totalBreakMinsVal ? String(Math.round(totalBreakMinsVal)) : '';
-        breaksDetailVal = breaksDetail || '';
-      } else if (action === 'breakStart' || action === 'breakEnd') {
-        storedBreaksJSON = JSON.stringify(breaks || []);
+        status = 'Completed';
+        // Use breaks array from app for accurate calculation
+        const mins = Math.round(totalBreakMins(breaks || []));
+        breakMins = mins > 0 ? String(mins) : '';
+        hours = calcHours(rowData[15], clockOutISO, breaks || []);
+        // Overwrite break columns from final app state (most accurate)
+        const bl = breaks || [];
+        if (bl[0]) { b1s = fmtTime(bl[0].start); b1e = bl[0].end ? fmtTime(bl[0].end) : b1e; }
+        if (bl[1]) { b2s = fmtTime(bl[1].start); b2e = bl[1].end ? fmtTime(bl[1].end) : b2e; }
+        if (bl[2]) { b3s = fmtTime(bl[2].start); b3e = bl[2].end ? fmtTime(bl[2].end) : b3e; }
       }
 
+      const updatedRow = buildRow({
+        employee,
+        date:        rowData[1],
+        day:         rowData[2],
+        clockIn:     rowData[3],
+        clockOut:    clockOutFmt,
+        hours,
+        breakMins,
+        b1s, b1e, b2s, b2e, b3s, b3e,
+        status,
+        updated:     now,
+        clockInISO:  rowData[15] || '',
+        clockOutISO: storedClockOutISO,
+      });
+
       await sheets.spreadsheets.values.update({
-        spreadsheetId: SHEET_ID, range: `${SHEET_NAME}!A${rowNumber}:M${rowNumber}`, valueInputOption: 'RAW',
-        requestBody: { values: [[
-          employee, rowData[1], rowData[2], rowData[3],
-          clockOutFmt, hoursWorked, totalBreak, breaksDetailVal,
-          status, now,
-          rowData[10] || '', storedClockOutISO, storedBreaksJSON
-        ]]}
+        spreadsheetId: SHEET_ID,
+        range: `${SHEET_NAME}!A${rowNumber}:Q${rowNumber}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [updatedRow] },
       });
     }
+
     res.status(200).json({ success: true });
+
   } catch (err) {
     console.error('Sheets API error:', err);
     res.status(500).json({ error: err.message });
