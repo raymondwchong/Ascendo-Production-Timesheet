@@ -123,7 +123,9 @@
 <script>
   // ── CONFIG ──────────────────────────────────────────────
   const EMPLOYEES = [
-    'Agustina', 'Andrew', 'Ann', 'Billy', 'Emily', 'Geoff', 'Hong', 'Lily', 'Novita', 'Philip', 'Pip Nagy', 'Sharon', 'Shina', 'Theresa', 'Jamie', 'Huiwen'
+    'Agustina', 'Andrew', 'Ann', 'Billy', 'Emily', 'Geoff',
+    'Hong', 'Lily', 'Novita', 'Philip', 'Pip Nagy', 'Sharon',
+    'Shina', 'Theresa', 'Jamie', 'Huiwen'
   ];
   // ────────────────────────────────────────────────────────
 
@@ -332,14 +334,15 @@
     const s = getActiveSession(name); if (!s) return;
     s.breaks.push({ start: nowISO(), end: null });
     saveLocal(); render(); showToast('Break started');
-    await apiLog({ action: 'breakStart', employee: name, breaks: s.breaks });
+    const newBreak = s.breaks[s.breaks.length - 1];
+    await apiLog({ action: 'breakStart', employee: name, breakStartFormatted: fmtTime(newBreak.start), breakIndex: s.breaks.length - 1 });
   }
 
   async function endBreak(name) {
     const s = getActiveSession(name); if (!s) return;
     const lb = s.breaks[s.breaks.length - 1]; if (lb) lb.end = nowISO();
     saveLocal(); render(); showToast('Break ended');
-    await apiLog({ action: 'breakEnd', employee: name, breaks: s.breaks });
+    await apiLog({ action: 'breakEnd', employee: name, breakEndFormatted: fmtTime(lb.end), breakIndex: s.breaks.length - 1, breaks: s.breaks });
   }
 
   async function clockOut(name) {
