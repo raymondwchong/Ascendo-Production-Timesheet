@@ -139,7 +139,7 @@
 
   function fmtTime(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
   function fmtDate(iso) {
@@ -168,8 +168,8 @@
     return breaks.map((b, i) => {
       const start = fmtTime(b.start);
       const end = b.end ? fmtTime(b.end) : 'ongoing';
-      const mins = b.start && b.end ? ` (${Math.round((new Date(b.end) - new Date(b.start)) / 60000)}m)` : '';
-      return `B${i + 1}: ${start}–${end}${mins}`;
+      const hrs = b.start && b.end ? ` (${((new Date(b.end) - new Date(b.start)) / 3600000).toFixed(2)}h)` : '';
+      return `B${i + 1}: ${start}–${end}${hrs}`;
     }).join(', ');
   }
 
@@ -259,7 +259,7 @@
     let breaksHTML = '';
     if (session && session.breaks && session.breaks.length > 0) {
       breaksHTML = `<div class="breaks-list">` + session.breaks.map((b, i) => {
-        const dur = b.start && b.end ? `${Math.round((new Date(b.end) - new Date(b.start)) / 60000)} min` : '';
+        const dur = b.start && b.end ? `${((new Date(b.end) - new Date(b.start)) / 3600000).toFixed(2)}h` : '';
         return `<div class="break-item"><span class="break-num">Break ${i + 1}</span><span>${fmtTime(b.start)} → ${b.end ? fmtTime(b.end) : ''}</span>${!b.end ? '<span class="break-ongoing">Ongoing</span>' : `<span>${dur}</span>`}</div>`;
       }).join('') + `</div>`;
     }
@@ -304,10 +304,10 @@
       const badgeLabel = status === 'in' ? 'Clocked In' : status === 'break' ? 'On Break' : 'Completed';
       let breaksCell = '—';
       if (s.breaks && s.breaks.length > 0) {
-        breaksCell = s.breaks.map((b, i) => { const dur = b.start && b.end ? ` (${Math.round((new Date(b.end) - new Date(b.start)) / 60000)}m)` : ' (ongoing)'; return `B${i+1}: ${fmtTime(b.start)}–${b.end ? fmtTime(b.end) : '?'}${dur}`; }).join('<br>');
+        breaksCell = s.breaks.map((b, i) => { const dur = b.start && b.end ? ` (${((new Date(b.end) - new Date(b.start)) / 3600000).toFixed(2)}h)` : ' (ongoing)'; return `B${i+1}: ${fmtTime(b.start)}–${b.end ? fmtTime(b.end) : '?'}${dur}`; }).join('<br>');
       }
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td class="cell-name">${s.employee}</td><td>${fmtDate(s.clockIn)}</td><td>${fmtDay(s.clockIn)}</td><td>${fmtTime(s.clockIn)}</td><td>${s.clockOut ? fmtTime(s.clockOut) : '—'}</td><td class="breaks-cell">${breaksCell}</td><td>${breakMins > 0 ? Math.round(breakMins) + ' min' : '—'}</td><td>${hours !== null ? hours.toFixed(2) + 'h' : '—'}</td><td class="cell-badge"><span class="badge ${badgeClass}">${badgeLabel}</span></td>`;
+      tr.innerHTML = `<td class="cell-name">${s.employee}</td><td>${fmtDate(s.clockIn)}</td><td>${fmtDay(s.clockIn)}</td><td>${fmtTime(s.clockIn)}</td><td>${s.clockOut ? fmtTime(s.clockOut) : '—'}</td><td class="breaks-cell">${breaksCell}</td><td>${breakMins > 0 ? (breakMins / 60).toFixed(2) + 'h' : '—'}</td><td>${hours !== null ? hours.toFixed(2) + 'h' : '—'}</td><td class="cell-badge"><span class="badge ${badgeClass}">${badgeLabel}</span></td>`;
       tbody.appendChild(tr);
     });
   }
