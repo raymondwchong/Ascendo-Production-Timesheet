@@ -85,6 +85,17 @@
     .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--text); color: var(--surface); border-radius: 30px; padding: 12px 22px; font-size: 14px; font-weight: 500; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); z-index: 999; white-space: nowrap; }
     .toast.show { transform: translateX(-50%) translateY(0); }
     .sync-indicator { display: inline-block; font-size: 11px; color: var(--text-faint); margin-left: 8px; }
+    .report-btn { position: fixed; bottom: 24px; right: 20px; background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 30px; padding: 10px 16px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; z-index: 998; box-shadow: 0 2px 8px rgba(0,0,0,0.08); touch-action: manipulation; }
+    .report-btn:active { opacity: 0.7; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 420px; }
+    .modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+    .modal textarea { width: 100%; border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 12px; font-family: 'DM Sans', sans-serif; font-size: 14px; resize: none; height: 100px; color: var(--text); background: var(--bg); }
+    .modal textarea:focus { outline: none; border-color: var(--border-strong); }
+    .modal-btns { display: flex; gap: 10px; margin-top: 14px; }
+    .modal-cancel { flex: 1; padding: 12px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-strong); background: var(--bg); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; color: var(--text); }
+    .modal-submit { flex: 2; padding: 12px; border-radius: var(--radius-sm); border: none; background: var(--red); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; color: #fff; }
   </style>
 </head>
 <body>
@@ -120,6 +131,18 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<button class="report-btn" onclick="openReportModal()">⚠ Report a Problem</button>
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal">
+    <h3>Report a Problem</h3>
+    <p>Briefly describe what you were trying to do and what happened. This will be sent automatically with your current status.</p>
+    <textarea id="problemDesc" placeholder="e.g. I pressed End Break and it went back to On Break..."></textarea>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeReportModal()">Cancel</button>
+      <button class="modal-submit" onclick="submitReport()">Submit Report</button>
+    </div>
+  </div>
+</div>
 <script>
   // ── CONFIG ──────────────────────────────────────────────
   const EMPLOYEES = [
@@ -204,10 +227,18 @@
 
   // ── API ───────────────────────────────────────────────────
   async function apiLog(payload) {
+    trackAction(payload.action);
     try {
       const res = await fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const err = await res.text().catch(() => res.status);
+        trackError(payload.action, err);
+      }
       return res.ok;
-    } catch(e) { return false; }
+    } catch(e) {
+      trackError(payload.action, e.message);
+      return false;
+    }
   }
 
   async function apiGetSessions() {
@@ -383,6 +414,73 @@
     });
   }
 
+
+  // ── Error & action tracking ──────────────────────────────
+  const errorLog = [];
+  let lastAction = 'none';
+
+  function trackAction(action) {
+    lastAction = action;
+  }
+
+  function trackError(context, error) {
+    errorLog.push({
+      time: new Date().toISOString(),
+      context,
+      error: error ? String(error) : 'unknown'
+    });
+    // Keep only last 20 errors
+    if (errorLog.length > 20) errorLog.shift();
+  }
+
+  function openReportModal() {
+    document.getElementById('problemDesc').value = '';
+    document.getElementById('modalOverlay').style.display = 'flex';
+  }
+
+  function closeReportModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+
+  async function submitReport() {
+    const desc = document.getElementById('problemDesc').value.trim() || '(no description provided)';
+    const session = state.selected ? getActiveSession(state.selected) : null;
+    const status = session ? getStatus(session) : 'not clocked in';
+
+    const payload = {
+      action: 'problemReport',
+      employee: state.selected || 'unknown',
+      description: desc,
+      currentStatus: status,
+      lastAction,
+      recentErrors: errorLog.slice(-5),
+      localSessions: state.sessions.filter(s => !s.clockOut).map(s => ({
+        employee: s.employee,
+        clockIn: s.clockIn,
+        breaks: s.breaks
+      })),
+      reportedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent
+    };
+
+    closeReportModal();
+    showToast('Sending report…');
+
+    try {
+      const res = await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        showToast('Report sent — thank you');
+      } else {
+        showToast('Report failed to send');
+      }
+    } catch(e) {
+      showToast('Report failed to send');
+    }
+  }
 
   async function init() { loadLocal(); render(); renderClock(); setInterval(renderClock, 1000); await syncFromSheet(); }
   init();
