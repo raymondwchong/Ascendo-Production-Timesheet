@@ -108,23 +108,63 @@ function buildRow(fields) {
   ];
 }
 
+async function ensureProblemLogHeaders(sheets) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `ProblemLog!A1:A1`,
+  });
+  if (!res.data.values || res.data.values.length === 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `ProblemLog!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['Reported At (AEST)', 'Employee', 'Current Status', 'Last Action', 'Description', 'Recent Errors', 'Active Sessions', 'Device']] },
+    });
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
+
+    const { action } = req.body;
+    const now = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+
+    // Handle problem reports separately
+    if (action === 'problemReport') {
+      await ensureProblemLogHeaders(sheets);
+      const { employee, description, currentStatus, lastAction, recentErrors, localSessions, reportedAt, userAgent } = req.body;
+      const row = [
+        now,
+        employee || 'unknown',
+        currentStatus || '',
+        lastAction || '',
+        description || '',
+        JSON.stringify(recentErrors || []),
+        JSON.stringify(localSessions || []),
+        userAgent || ''
+      ];
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `ProblemLog!A:H`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [row] },
+      });
+      return res.status(200).json({ success: true });
+    }
+
     await ensureHeaders(sheets);
 
     const {
-      action, employee,
       clockInFormatted, clockInDate, clockInDay, clockInISO,
       clockOutFormatted, clockOutISO,
       breaks,
       breakStartFormatted, breakEndFormatted, breakIndex,
     } = req.body;
-
-    const now = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+    const employee = req.body.employee;
 
     if (action === 'clockIn') {
       const row = buildRow({
