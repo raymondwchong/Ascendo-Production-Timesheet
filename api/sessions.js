@@ -45,9 +45,16 @@ export default async function handler(req, res) {
         function parseBack(timeStr) {
           if (!timeStr || !dateStr) return null;
           try {
-            // Parse "09:30 AM" style back to ISO using the shift date
-            const dt = new Date(`${dateStr} ${timeStr}`);
-            return isNaN(dt.getTime()) ? null : dt.toISOString();
+            // Times are stored in 24-hour HH:MM format
+            // dateStr is from _clockInISO so is UTC date — combine carefully
+            const [h, m] = timeStr.split(':').map(Number);
+            if (isNaN(h) || isNaN(m)) return null;
+            // Use the clock-in ISO to get the correct local date
+            const base = new Date(clockInISO);
+            // Set hours and minutes in local time
+            const local = new Date(base);
+            local.setHours(h, m, 0, 0);
+            return local.toISOString();
           } catch { return null; }
         }
 
