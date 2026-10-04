@@ -43,7 +43,10 @@ async function ensureHeaders(sheets) {
 
 function fmtTime(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const d = new Date(iso);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return h + ':' + m;
 }
 
 function fmtDate(iso) {
