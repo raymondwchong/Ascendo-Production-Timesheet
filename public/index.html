@@ -482,7 +482,7 @@
     }
   }
 
-  async function init() { loadLocal(); render(); renderClock(); setInterval(renderClock, 1000); await syncFromSheet(); }
+  async function init() { loadLocal(); render(); renderClock(); setInterval(renderClock, 1000); await syncFromSheet(); setInterval(syncFromSheet, 30000); }
   init();
 </script>
 </body>
