@@ -247,22 +247,28 @@
   }
 
   async function syncFromSheet() {
-    // Only sync sessions that are already completed — never overwrite active sessions
     setSyncStatus('Syncing…');
     const data = await apiGetSessions();
     if (data && data.sessions) {
-      // Keep any active local sessions (no clockOut) and merge in completed ones from sheet
-      const activeSessions = state.sessions.filter(s => !s.clockOut);
-      const completedFromSheet = data.sessions.filter(s => s.clockOut);
-      // Merge: use sheet data for completed, keep local data for active
-      const merged = [...completedFromSheet];
-      activeSessions.forEach(active => {
-        // Only add active session if sheet doesn't already have it completed
-        const alreadyCompleted = completedFromSheet.find(
-          s => s.employee === active.employee && s.clockIn === active.clockIn
-        );
-        if (!alreadyCompleted) merged.push(active);
+      // Sessions this device owns locally (active — no clockOut)
+      const localActive = state.sessions.filter(s => !s.clockOut);
+
+      // Start with everything from the sheet (all devices, all statuses)
+      const merged = [...data.sessions];
+
+      // For each locally active session, our version takes priority
+      // because it's more current than what the sheet has
+      localActive.forEach(active => {
+        const sheetIdx = merged.findIndex(s => s.employee === active.employee && !s.clockOut);
+        if (sheetIdx !== -1) {
+          // Replace sheet version with local version
+          merged[sheetIdx] = active;
+        } else {
+          // Sheet doesn't have this active session yet — add it
+          merged.push(active);
+        }
       });
+
       state.sessions = merged;
       saveLocal();
     }
