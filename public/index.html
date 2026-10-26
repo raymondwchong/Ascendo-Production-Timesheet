@@ -148,7 +148,7 @@
   const EMPLOYEES = [
     'Agustina', 'Andrew', 'Ann', 'Billy', 'Emily', 'Geoff',
     'Hong', 'Lily', 'Novita', 'Philip', 'Pip Nagy', 'Sharon',
-    'Shina', 'Theresa', 'Jamie', 'Huiwen', 'Yan Mei', 'Joyce'
+    'Shina', 'Theresa', 'Jamie', 'Huiwen', 'YAN MEI', 'Joyce'
   ];
   // ────────────────────────────────────────────────────────
 
@@ -246,27 +246,27 @@
     return null;
   }
 
+  // How long a tablet's own recent tap overrides the sheet (covers slow saves)
+  const LOCAL_WINS_MS = 90000;
+
   async function syncFromSheet() {
     setSyncStatus('Syncing…');
     const data = await apiGetSessions();
     if (data && data.sessions) {
-      // Sessions this device owns locally (active — no clockOut)
-      const localActive = state.sessions.filter(s => !s.clockOut);
+      // The sheet is the source of truth for every tablet.
+      const merged = data.sessions.slice();
+      const key = s => s.employee + '|' + s.clockIn;
+      const now = Date.now();
 
-      // Start with everything from the sheet (all devices, all statuses)
-      const merged = [...data.sessions];
-
-      // For each locally active session, our version takes priority
-      // because it's more current than what the sheet has
-      localActive.forEach(active => {
-        const sheetIdx = merged.findIndex(s => s.employee === active.employee && !s.clockOut);
-        if (sheetIdx !== -1) {
-          // Replace sheet version with local version
-          merged[sheetIdx] = active;
-        } else {
-          // Sheet doesn't have this active session yet — add it
-          merged.push(active);
-        }
+      // Only a shift changed on THIS tablet in the last 90 seconds may override
+      // the sheet (its save may still be in progress). Older local copies are dropped.
+      state.sessions.forEach(local => {
+        const recent = local.localUpdatedAt && (now - local.localUpdatedAt) < LOCAL_WINS_MS;
+        if (!recent) return;
+        const idx = merged.findIndex(s => key(s) === key(local));
+        if (idx === -1) merged.push(local);                 // not saved to sheet yet
+        else if (!merged[idx].clockOut) merged[idx] = local; // our newer edit to an open shift
+        // If the sheet says the shift is completed, the sheet wins.
       });
 
       state.sessions = merged;
@@ -372,11 +372,20 @@
   function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
   // ── Actions (all times formatted in browser before sending) ──
+  // Ignore a second tap that lands within 1.5s (stops accidental double taps
+  // turning "Clock In" into "Clock In + Take a Break").
+  let tapLocked = false;
+  function lockTaps() {
+    if (tapLocked) return false;
+    tapLocked = true; setTimeout(() => { tapLocked = false; }, 1500);
+    return true;
+  }
   async function clockIn(name) {
+    if (!lockTaps() || getActiveSession(name)) return;
     const now = nowISO();
-    const session = { employee: name, clockIn: now, breaks: [], clockOut: null };
+    const session = { employee: name, clockIn: now, breaks: [], clockOut: null, localUpdatedAt: Date.now() };
     state.sessions.push(session); saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked in`);
-    await apiLog({
+    const ok = await apiLog({
       action: 'clockIn',
       employee: name,
       clockInISO: now,
@@ -384,40 +393,53 @@
       clockInDate: fmtDate(now),
       clockInDay: fmtDay(now)
     });
+    if (!ok) {
+      // Not saved to the sheet: undo so the screen doesn't show a clock-in that doesn't exist
+      state.sessions = state.sessions.filter(s => s !== session);
+      saveLocal(); render();
+      showToast('Clock-in NOT saved. Check Wi-Fi and try again.');
+    }
   }
 
   async function startBreak(name) {
+    if (!lockTaps()) return;
     const s = getActiveSession(name); if (!s) return;
-    s.breaks.push({ start: nowISO(), end: null });
+    s.breaks.push({ start: nowISO(), end: null }); s.localUpdatedAt = Date.now();
     saveLocal(); render(); showToast('Break started');
     const newBreak = s.breaks[s.breaks.length - 1];
-    await apiLog({ action: 'breakStart', employee: name, breakStartFormatted: fmtTime(newBreak.start), breakIndex: s.breaks.length - 1 });
+    const ok = await apiLog({ action: 'breakStart', employee: name, clockInISO: s.clockIn, breaks: s.breaks, breakStartFormatted: fmtTime(newBreak.start), breakIndex: s.breaks.length - 1 });
+    if (!ok) showToast('Break NOT saved. Check Wi-Fi and try again.');
   }
 
   async function endBreak(name) {
+    if (!lockTaps()) return;
     const s = getActiveSession(name); if (!s) return;
-    const lb = s.breaks[s.breaks.length - 1]; if (lb) lb.end = nowISO();
+    const lb = s.breaks[s.breaks.length - 1]; if (lb) lb.end = nowISO(); s.localUpdatedAt = Date.now();
     saveLocal(); render(); showToast('Break ended');
-    await apiLog({ action: 'breakEnd', employee: name, breakEndFormatted: fmtTime(lb.end), breakIndex: s.breaks.length - 1, breaks: s.breaks });
+    const ok = await apiLog({ action: 'breakEnd', employee: name, clockInISO: s.clockIn, breakEndFormatted: fmtTime(lb.end), breakIndex: s.breaks.length - 1, breaks: s.breaks });
+    if (!ok) showToast('Break end NOT saved. Check Wi-Fi and try again.');
   }
 
   async function clockOut(name) {
+    if (!lockTaps()) return;
     const s = getActiveSession(name); if (!s) return;
     const lb = s.breaks[s.breaks.length - 1]; if (lb && !lb.end) lb.end = nowISO();
-    s.clockOut = nowISO(); state.selected = null;
+    s.clockOut = nowISO(); s.localUpdatedAt = Date.now(); state.selected = null;
     saveLocal(); render(); showToast(`${name.split(' ')[0]} clocked out`);
     const hours = calcHours(s);
     const breakMins = totalBreakMins(s.breaks);
-    await apiLog({
+    const ok = await apiLog({
       action: 'clockOut',
       employee: name,
       clockInISO: s.clockIn,
       clockOutISO: s.clockOut,
       clockOutFormatted: fmtTime(s.clockOut),
       breaks: s.breaks,
+      breaksFormatted: s.breaks.map(b => ({ start: fmtTime(b.start), end: b.end ? fmtTime(b.end) : '' })),
       breaksDetail: formatBreaksDetail(s.breaks),
       totalBreakMins: breakMins
     });
+    if (!ok) showToast('Clock-out NOT saved. Check Wi-Fi and try again.');
   }
 
 
