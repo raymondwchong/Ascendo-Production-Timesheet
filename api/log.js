@@ -5,7 +5,7 @@ const SHEET_NAME = 'TimeLog';
 // Columns: A=Employee, B=Date, C=Day, D=ClockIn, E=ClockOut,
 //          F=HoursWorked, G=TotalBreak(min), H=B1Start, I=B1End,
 //          J=B2Start, K=B2End, L=B3Start, M=B3End, N=Status, O=LastUpdated
-//          P=_clockInISO, Q=_clockOutISO
+//          P=_clockInISO, Q=_clockOutISO, R=_breaksJSON (exact break times, for syncing)
 
 const HEADERS = [
   'Employee','Date','Day','Clock In','Clock Out',
@@ -14,7 +14,7 @@ const HEADERS = [
   'Break 2 Start','Break 2 End',
   'Break 3 Start','Break 3 End',
   'Status','Last Updated',
-  '_clockInISO','_clockOutISO'
+  '_clockInISO','_clockOutISO','_breaksJSON'
 ];
 
 async function getAuthClient() {
@@ -29,9 +29,19 @@ async function getAuthClient() {
 async function ensureHeaders(sheets) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A1:A1`,
+    range: `${SHEET_NAME}!A1:R1`,
   });
-  if (!res.data.values || res.data.values.length === 0) {
+  const existing = (res.data.values && res.data.values[0]) || [];
+  if (existing.length > 0 && !existing[17]) {
+    // Older sheet without column R: add just that header
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!R1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['_breaksJSON']] },
+    });
+  }
+  if (existing.length === 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SHEET_ID,
       range: `${SHEET_NAME}!A1`,
@@ -70,23 +80,25 @@ function calcHours(clockInISO, clockOutISO, breaks) {
   return Math.max(0, total - totalBreakMins(breaks) / 60).toFixed(2);
 }
 
-// Find the active (no clock out) row for this employee
-async function findActiveRow(sheets, employee) {
+// Find the open (not Completed) row for this employee.
+// If clockInISO is given, ONLY the row for that exact shift (column P) is accepted,
+// so a stale screen can never close someone's newer shift by mistake.
+async function findActiveRow(sheets, employee, clockInISO) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:Q`,
+    range: `${SHEET_NAME}!A:R`,
   });
   const rows = res.data.values || [];
   for (let i = rows.length - 1; i >= 1; i--) {
     if (rows[i][0] === employee && rows[i][13] !== 'Completed') {
-      return { rowNumber: i + 1, rowData: rows[i] };
+      if (!clockInISO || rows[i][15] === clockInISO) return { rowNumber: i + 1, rowData: rows[i] };
     }
   }
   return null;
 }
 
 function buildRow(fields) {
-  // Always returns a full 17-column row
+  // Always returns a full 18-column row
   return [
     fields.employee   || '',
     fields.date       || '',
@@ -105,7 +117,23 @@ function buildRow(fields) {
     fields.updated    || '',
     fields.clockInISO || '',
     fields.clockOutISO|| '',
+    fields.breaksJSON || '',
   ];
+}
+
+async function ensureProblemLogHeaders(sheets) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `ProblemLog!A1:A1`,
+  });
+  if (!res.data.values || res.data.values.length === 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `ProblemLog!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['Reported At (AEST)', 'Employee', 'Current Status', 'Last Action', 'Description', 'Recent Errors', 'Active Sessions', 'Device']] },
+    });
+  }
 }
 
 export default async function handler(req, res) {
@@ -114,19 +142,50 @@ export default async function handler(req, res) {
   try {
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
+
+    const { action } = req.body;
+    const now = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+
+    // Handle problem reports separately
+    if (action === 'problemReport') {
+      await ensureProblemLogHeaders(sheets);
+      const { employee, description, currentStatus, lastAction, recentErrors, localSessions, reportedAt, userAgent } = req.body;
+      const row = [
+        now,
+        employee || 'unknown',
+        currentStatus || '',
+        lastAction || '',
+        description || '',
+        JSON.stringify(recentErrors || []),
+        JSON.stringify(localSessions || []),
+        userAgent || ''
+      ];
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `ProblemLog!A:H`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [row] },
+      });
+      return res.status(200).json({ success: true });
+    }
+
     await ensureHeaders(sheets);
 
     const {
-      action, employee,
       clockInFormatted, clockInDate, clockInDay, clockInISO,
       clockOutFormatted, clockOutISO,
       breaks,
       breakStartFormatted, breakEndFormatted, breakIndex,
+      breaksFormatted,
     } = req.body;
-
-    const now = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+    const employee = req.body.employee;
 
     if (action === 'clockIn') {
+      // Don't write the same clock-in twice (e.g. a repeated request)
+      const existing = await findActiveRow(sheets, employee, clockInISO);
+      if (existing && existing.rowData[15] === clockInISO) {
+        return res.status(200).json({ success: true, duplicate: true });
+      }
       const row = buildRow({
         employee,
         date: clockInDate,
@@ -138,13 +197,13 @@ export default async function handler(req, res) {
       });
       await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A:Q`,
+        range: `${SHEET_NAME}!A:R`,
         valueInputOption: 'RAW',
         requestBody: { values: [row] },
       });
 
     } else {
-      const found = await findActiveRow(sheets, employee);
+      const found = await findActiveRow(sheets, employee, clockInISO);
       if (!found) return res.status(404).json({ error: 'Active session not found' });
       const { rowNumber, rowData } = found;
 
@@ -159,6 +218,9 @@ export default async function handler(req, res) {
       let hours        = rowData[5]  || '';
       let breakMins    = rowData[6]  || '';
       let storedClockOutISO = rowData[16] || '';
+      let breaksJSON = rowData[17] || '';
+      // Exact break times from the tablet (used by other tablets to show breaks correctly)
+      if (Array.isArray(breaks)) breaksJSON = JSON.stringify(breaks);
       let status = rowData[13] || 'Clocked In';
 
       if (action === 'breakStart') {
@@ -183,11 +245,12 @@ export default async function handler(req, res) {
         const mins = Math.round(totalBreakMins(breaks || []));
         breakMins = mins > 0 ? String(mins) : '';
         hours = calcHours(rowData[15], clockOutISO, breaks || []);
-        // Overwrite break columns from final app state (most accurate)
-        const bl = breaks || [];
-        if (bl[0]) { b1s = fmtTime(bl[0].start); b1e = bl[0].end ? fmtTime(bl[0].end) : b1e; }
-        if (bl[1]) { b2s = fmtTime(bl[1].start); b2e = bl[1].end ? fmtTime(bl[1].end) : b2e; }
-        if (bl[2]) { b3s = fmtTime(bl[2].start); b3e = bl[2].end ? fmtTime(bl[2].end) : b3e; }
+        // Overwrite break columns with the final times, formatted by the tablet
+        // (the server runs in UTC, so it must not format times itself)
+        const bf = Array.isArray(breaksFormatted) ? breaksFormatted : [];
+        if (bf[0]) { b1s = bf[0].start || b1s; b1e = bf[0].end || b1e; }
+        if (bf[1]) { b2s = bf[1].start || b2s; b2e = bf[1].end || b2e; }
+        if (bf[2]) { b3s = bf[2].start || b3s; b3e = bf[2].end || b3e; }
       }
 
       const updatedRow = buildRow({
@@ -203,11 +266,12 @@ export default async function handler(req, res) {
         updated:     now,
         clockInISO:  rowData[15] || '',
         clockOutISO: storedClockOutISO,
+        breaksJSON,
       });
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A${rowNumber}:Q${rowNumber}`,
+        range: `${SHEET_NAME}!A${rowNumber}:R${rowNumber}`,
         valueInputOption: 'RAW',
         requestBody: { values: [updatedRow] },
       });
