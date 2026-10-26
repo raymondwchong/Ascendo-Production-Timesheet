@@ -14,7 +14,7 @@ async function getAuthClient() {
 // Columns: A=Employee, B=Date, C=Day, D=ClockIn, E=ClockOut,
 //          F=HoursWorked, G=TotalBreak(min), H=B1Start, I=B1End,
 //          J=B2Start, K=B2End, L=B3Start, M=B3End, N=Status, O=LastUpdated
-//          P=_clockInISO, Q=_clockOutISO
+//          P=_clockInISO, Q=_clockOutISO, R=_breaksJSON
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A2:Q`,
+      range: `${SHEET_NAME}!A2:R`,
     });
 
     const rows = response.data.values || [];
@@ -58,6 +58,18 @@ export default async function handler(req, res) {
           } catch { return null; }
         }
 
+        // Preferred: exact break times saved by the tablet (column R)
+        if (r[17]) {
+          try {
+            const exact = JSON.parse(r[17]);
+            if (Array.isArray(exact)) {
+              return { employee: r[0], clockIn: clockInISO, clockOut: clockOutISO || null,
+                       breaks: exact.filter(b => b && b.start) };
+            }
+          } catch {}
+        }
+
+        // Older rows without column R: rebuild from the H–M time columns
         const breaks = [];
         if (r[7]) breaks.push({ start: parseBack(r[7]), end: r[8] ? parseBack(r[8]) : null });
         if (r[9]) breaks.push({ start: parseBack(r[9]), end: r[10] ? parseBack(r[10]) : null });
@@ -72,7 +84,16 @@ export default async function handler(req, res) {
       })
       .filter(s => s.clockIn);
 
-    res.status(200).json({ sessions });
+    // Remove duplicate rows for the same shift (same employee + same clock-in).
+    // If one copy is completed, keep the completed one.
+    const byKey = new Map();
+    sessions.forEach(s => {
+      const k = s.employee + '|' + s.clockIn;
+      const prev = byKey.get(k);
+      if (!prev || (!prev.clockOut && s.clockOut)) byKey.set(k, s);
+    });
+
+    res.status(200).json({ sessions: Array.from(byKey.values()) });
 
   } catch (err) {
     console.error('Sheets read error:', err);
